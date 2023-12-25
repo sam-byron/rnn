@@ -169,55 +169,21 @@ torch.manual_seed(1)
 model = embedRNN(vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size) 
 model = model.to(device)
 
-# summary(model, input_size=(64, 1, embed_dim, 24), device="cpu")
 print(model)
-# summary(model, input_size=(batch_size, embed_dim), lengths=64)
 summary(model, input_data=[text_batch, length_batch], verbose=2)
-
-
-def train(dataloader):
-    model.train()
-    total_acc, total_loss = 0, 0
-    for text_batch, label_batch, lengths in dataloader:
-        optimizer.zero_grad()
-        pred = model(text_batch, lengths)[:, 0]
-        # summary(model, input_size=(batch_size, embed_dim), lengths=lengths[0])
-        # summary(model, input_data=[text_batch, lengths])
-        loss = loss_fn(pred, label_batch)
-        loss.backward()
-        optimizer.step()
-        total_acc += ((pred>=0.5).float() == label_batch).float().sum().item()
-        total_loss += loss.item()*label_batch.size(0)
-    return total_acc/len(dataloader.dataset), total_loss/len(dataloader.dataset)
- 
-def evaluate(dataloader, size):
-    model.eval()
-    total_acc, total_loss = 0, 0
-    with torch.no_grad():
-        for text_batch, label_batch, lengths in dataloader:
-            pred = model(text_batch, lengths)[:, 0]
-            loss = loss_fn(pred, label_batch)
-            total_acc += ((pred>=0.5).float() == label_batch).float().sum().item()
-            total_loss += loss.item()*label_batch.size(0)
-    return total_acc/size, total_loss/size
-
-    # return total_acc/len(dataloader.dataset), total_loss/len(dataloader.dataset)
-            
-
-
 
 
 loss_fn = nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-num_epochs = 1
+num_epochs = 10
 
 torch.manual_seed(1)
  
 for epoch in range(num_epochs):
     start_time = time.time()
-    acc_train, loss_train = train(train_dl)
-    acc_valid, loss_valid = evaluate(valid_dl, valid_size)
+    acc_train, loss_train = model.train_procedure(train_dl, optimizer, loss_fn)
+    acc_valid, loss_valid = model.evaluate_procedure(valid_dl, valid_size, loss_fn)
     end_time = time.time()
     print(f'Epoch {epoch} accuracy: {acc_train:.4f} val_accuracy: {acc_valid:.4f} time: {end_time-start_time}')
  
@@ -225,7 +191,7 @@ for epoch in range(num_epochs):
 
 
 
-acc_test, _ = evaluate(test_dl, test_size)
+acc_test, _ = model.evaluate_procedure(test_dl, test_size, loss_fn)
 print(f'test_accuracy: {acc_test:.4f}') 
 
 
@@ -245,14 +211,14 @@ summary(model, input_data=[text_batch, length_batch], verbose=2)
 loss_fn = nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
 
-num_epochs = 1
+num_epochs = 10
 
 torch.manual_seed(1)
  
 for epoch in range(num_epochs):
     start_time = time.time()
-    acc_train, loss_train = train(train_dl)
-    acc_valid, loss_valid = evaluate(valid_dl, valid_size)
+    acc_train, loss_train = model.train_procedure(train_dl, optimizer, loss_fn)
+    acc_valid, loss_valid = model.evaluate_procedure(valid_dl, valid_size, loss_fn)
     end_time = time.time()
     print(f'Epoch {epoch} accuracy: {acc_train:.4f} val_accuracy: {acc_valid:.4f} time: {end_time-start_time}')
 
@@ -266,7 +232,7 @@ test_dl = DataLoader(test_dataset, batch_size=batch_size,
 
 
 
-acc_test, _ = evaluate(test_dl, test_size)
+acc_test, _ = model.evaluate_procedure(test_dl, test_size, loss_fn)
 print(f'test_accuracy: {acc_test:.4f}') 
 
 
@@ -276,29 +242,36 @@ print(f'test_accuracy: {acc_test:.4f}')
 
 # 
 # ---
-
-class RNN(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        super().__init__()
-        self.rnn = nn.RNN(input_size, 
-                          hidden_size, 
-                          num_layers=2, 
-                          batch_first=True)
-        #self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
-        #self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, 1)
-        
-    def forward(self, x):
-        _, hidden = self.rnn(x)
-        out = hidden[-1, :, :]
-        out = self.fc(out)
-        return out
-
-model = RNN(64, 32) 
+torch.manual_seed(1)
+model = embedRNN(vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, rnn_type="simple")  
+model.to(device)
 
 print(model) 
- 
-model(torch.randn(5, 3, 64)) 
+summary(model, input_data=[text_batch, length_batch], verbose=2)
+
+loss_fn = nn.BCELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
+
+num_epochs = 10
+torch.manual_seed(1)
+
+for epoch in range(num_epochs):
+    start_time = time.time()
+    acc_train, loss_train = model.train_procedure(train_dl, optimizer, loss_fn)
+    acc_valid, loss_valid = model.evaluate_procedure(valid_dl, valid_size, loss_fn)
+    end_time = time.time()
+    print(f'Epoch {epoch} accuracy: {acc_train:.4f} val_accuracy: {acc_valid:.4f} time: {end_time-start_time}')
+
+
+
+
+test_dataset = IMDB(split='test')
+test_dl = DataLoader(test_dataset, batch_size=batch_size,
+                     shuffle=False, collate_fn=collate_fn)
+
+
+acc_test, _ = model.evaluate_procedure(test_dl, test_size, loss_fn)
+print(f'test_accuracy: {acc_test:.4f}') 
 
 # 
 # 

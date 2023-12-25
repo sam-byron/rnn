@@ -24,6 +24,7 @@ class embedRNN(nn.Module):
     def __init__(self, vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, bidirectional=False, rnn_type="lstm", num_layers=1):
         super().__init__()
         self.bidirectional = bidirectional
+        self.rnn_type = rnn_type
         self.embedding = nn.Embedding(vocab_size, 
                                       embed_dim, 
                                       padding_idx=0) 
@@ -37,7 +38,7 @@ class embedRNN(nn.Module):
                             batch_first=True,
                             num_layers=num_layers,bidirectional=bidirectional)
         elif rnn_type == "gru":
-            self.gru = nn.GRU(embed_dim, rnn_hidden_size, num_layers=num_layers, batch_first=True)
+            self.rnn = nn.GRU(embed_dim, rnn_hidden_size, num_layers=num_layers, batch_first=True)
         if bidirectional:
             self.fc1 = nn.Linear(rnn_hidden_size*2, fc_hidden_size)
         else:
@@ -49,7 +50,10 @@ class embedRNN(nn.Module):
     def forward(self, text, lengths):
         out = self.embedding(text)
         out = nn.utils.rnn.pack_padded_sequence(out, lengths.cpu().numpy(), enforce_sorted=False, batch_first=True)
-        _, (hidden, cell) = self.rnn(out)
+        if self.rnn_type == "lstm":
+            _, (hidden, cell) = self.rnn(out)
+        elif self.rnn_type == "simple":
+            _, hidden = self.rnn(out)
         if self.bidirectional:
             out = torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1)
         else:
@@ -59,3 +63,27 @@ class embedRNN(nn.Module):
         out = self.fc2(out)
         out = self.sigmoid(out)
         return out
+    
+    def train_procedure(self, dataloader, optimizer, loss_fn):
+        self.train()
+        total_acc, total_loss = 0, 0
+        for text_batch, label_batch, lengths in dataloader:
+            optimizer.zero_grad()
+            pred = self(text_batch, lengths)[:, 0]
+            loss = loss_fn(pred, label_batch)
+            loss.backward()
+            optimizer.step()
+            total_acc += ((pred>=0.5).float() == label_batch).float().sum().item()
+            total_loss += loss.item()*label_batch.size(0)
+        return total_acc/len(dataloader.dataset), total_loss/len(dataloader.dataset)
+    
+    def evaluate_procedure(self, dataloader, size, loss_fn):
+        self.eval()
+        total_acc, total_loss = 0, 0
+        with torch.no_grad():
+            for text_batch, label_batch, lengths in dataloader:
+                pred = self(text_batch, lengths)[:, 0]
+                loss = loss_fn(pred, label_batch)
+                total_acc += ((pred>=0.5).float() == label_batch).float().sum().item()
+                total_loss += loss.item()*label_batch.size(0)
+        return total_acc/size, total_loss/size

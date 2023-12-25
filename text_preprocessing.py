@@ -30,6 +30,7 @@ def vocab_builder(token_counts):
 
 
 ## Step 3-B: wrap the encode and transformation function
+# https://www.tutorialspoint.com/How-can-a-Python-function-return-a-function
 def encode_transform_batch(vocabulary, device):
 
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
