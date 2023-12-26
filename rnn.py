@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import time
 
 # Fully connected neural network with one hidden layer
 class RNN(nn.Module):
@@ -21,10 +21,12 @@ class RNN(nn.Module):
         return out
 
 class embedRNN(nn.Module):
-    def __init__(self, vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, bidirectional=False, rnn_type="lstm", num_layers=1):
+    def __init__(self, vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, loss_fn, bidirectional=False, rnn_type="lstm", num_layers=1):
         super().__init__()
         self.bidirectional = bidirectional
         self.rnn_type = rnn_type
+        self.optimizer = None
+        self.loss_fn = loss_fn
         self.embedding = nn.Embedding(vocab_size, 
                                       embed_dim, 
                                       padding_idx=0) 
@@ -64,26 +66,34 @@ class embedRNN(nn.Module):
         out = self.sigmoid(out)
         return out
     
-    def train_procedure(self, dataloader, optimizer, loss_fn):
+    def train_procedure(self, dataloader):
         self.train()
         total_acc, total_loss = 0, 0
         for text_batch, label_batch, lengths in dataloader:
-            optimizer.zero_grad()
+            self.optimizer.zero_grad()
             pred = self(text_batch, lengths)[:, 0]
-            loss = loss_fn(pred, label_batch)
+            loss = self.loss_fn(pred, label_batch)
             loss.backward()
-            optimizer.step()
+            self.optimizer.step()
             total_acc += ((pred>=0.5).float() == label_batch).float().sum().item()
             total_loss += loss.item()*label_batch.size(0)
         return total_acc/len(dataloader.dataset), total_loss/len(dataloader.dataset)
     
-    def evaluate_procedure(self, dataloader, size, loss_fn):
+    def evaluate_procedure(self, dataloader, size):
         self.eval()
         total_acc, total_loss = 0, 0
         with torch.no_grad():
             for text_batch, label_batch, lengths in dataloader:
                 pred = self(text_batch, lengths)[:, 0]
-                loss = loss_fn(pred, label_batch)
+                loss = self.loss_fn(pred, label_batch)
                 total_acc += ((pred>=0.5).float() == label_batch).float().sum().item()
                 total_loss += loss.item()*label_batch.size(0)
         return total_acc/size, total_loss/size
+    
+    def train_epochs(self, num_epochs, train_dl, valid_dl, valid_size):
+        for epoch in range(num_epochs):
+            start_time = time.time()
+            acc_train, loss_train = self.train_procedure(train_dl)
+            acc_valid, loss_valid = self.evaluate_procedure(valid_dl, valid_size)
+            end_time = time.time()
+            print(f'Epoch {epoch} accuracy: {acc_train:.4f} val_accuracy: {acc_valid:.4f} time: {end_time-start_time}')

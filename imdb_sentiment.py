@@ -166,32 +166,22 @@ rnn_hidden_size = 64
 fc_hidden_size = 64*2
 
 torch.manual_seed(1)
-model = embedRNN(vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size) 
+loss_fn = nn.BCELoss()
+model = embedRNN(vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, loss_fn) 
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+model.optimizer = optimizer
 model = model.to(device)
 
 print(model)
 summary(model, input_data=[text_batch, length_batch], verbose=2)
 
-
-loss_fn = nn.BCELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
 num_epochs = 10
-
 torch.manual_seed(1)
- 
-for epoch in range(num_epochs):
-    start_time = time.time()
-    acc_train, loss_train = model.train_procedure(train_dl, optimizer, loss_fn)
-    acc_valid, loss_valid = model.evaluate_procedure(valid_dl, valid_size, loss_fn)
-    end_time = time.time()
-    print(f'Epoch {epoch} accuracy: {acc_train:.4f} val_accuracy: {acc_valid:.4f} time: {end_time-start_time}')
- 
+model.train_epochs(num_epochs, train_dl, valid_dl, valid_size)
 
 
 
-
-acc_test, _ = model.evaluate_procedure(test_dl, test_size, loss_fn)
+acc_test, _ = model.evaluate_procedure(test_dl, test_size)
 print(f'test_accuracy: {acc_test:.4f}') 
 
 
@@ -201,38 +191,26 @@ print(f'test_accuracy: {acc_test:.4f}')
 
     
 torch.manual_seed(1)
-model = embedRNN(vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, bidirectional=True) 
+loss_fn = nn.BCELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
+model = embedRNN(vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, loss_fn, bidirectional=True) 
+optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
+model.optimizer = optimizer
 model = model.to(device)
 
 print(model)
 summary(model, input_data=[text_batch, length_batch], verbose=2)
 
-
-loss_fn = nn.BCELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
-
 num_epochs = 10
-
 torch.manual_seed(1)
- 
-for epoch in range(num_epochs):
-    start_time = time.time()
-    acc_train, loss_train = model.train_procedure(train_dl, optimizer, loss_fn)
-    acc_valid, loss_valid = model.evaluate_procedure(valid_dl, valid_size, loss_fn)
-    end_time = time.time()
-    print(f'Epoch {epoch} accuracy: {acc_train:.4f} val_accuracy: {acc_valid:.4f} time: {end_time-start_time}')
-
-
-
+model.train_epochs(num_epochs, train_dl, valid_dl, valid_size)
 
 test_dataset = IMDB(split='test')
 test_dl = DataLoader(test_dataset, batch_size=batch_size,
                      shuffle=False, collate_fn=collate_fn)
 
 
-
-
-acc_test, _ = model.evaluate_procedure(test_dl, test_size, loss_fn)
+acc_test, _ = model.evaluate_procedure(test_dl, test_size)
 print(f'test_accuracy: {acc_test:.4f}') 
 
 
@@ -243,34 +221,25 @@ print(f'test_accuracy: {acc_test:.4f}')
 # 
 # ---
 torch.manual_seed(1)
-model = embedRNN(vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, rnn_type="simple")  
+loss_fn = nn.BCELoss()
+model = embedRNN(vocab_size, embed_dim, rnn_hidden_size, fc_hidden_size, loss_fn,  rnn_type="simple")  
+optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
+model.optimizer = optimizer
 model.to(device)
 
 print(model) 
 summary(model, input_data=[text_batch, length_batch], verbose=2)
 
-loss_fn = nn.BCELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
-
 num_epochs = 10
 torch.manual_seed(1)
-
-for epoch in range(num_epochs):
-    start_time = time.time()
-    acc_train, loss_train = model.train_procedure(train_dl, optimizer, loss_fn)
-    acc_valid, loss_valid = model.evaluate_procedure(valid_dl, valid_size, loss_fn)
-    end_time = time.time()
-    print(f'Epoch {epoch} accuracy: {acc_train:.4f} val_accuracy: {acc_valid:.4f} time: {end_time-start_time}')
-
-
-
+model.train_epochs(num_epochs, train_dl, valid_dl, valid_size)
 
 test_dataset = IMDB(split='test')
 test_dl = DataLoader(test_dataset, batch_size=batch_size,
                      shuffle=False, collate_fn=collate_fn)
 
 
-acc_test, _ = model.evaluate_procedure(test_dl, test_size, loss_fn)
+acc_test, _ = model.evaluate_procedure(test_dl, test_size)
 print(f'test_accuracy: {acc_test:.4f}') 
 
 # 
