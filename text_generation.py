@@ -212,27 +212,38 @@ model
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
 
-num_epochs = 10000 
+# num_epochs = 10000 
+num_epochs = 5000
 
 torch.manual_seed(1)
 
-for epoch in range(num_epochs):
-    hidden, cell = model.init_hidden(batch_size)
-    seq_batch, target_batch = next(iter(seq_dl))
-    seq_batch = seq_batch.to(device)
-    target_batch = target_batch.to(device)
-    optimizer.zero_grad()
-    loss = 0
-    for c in range(seq_length):
-        pred, hidden, cell = model(seq_batch[:, c], hidden, cell) 
-        loss += loss_fn(pred, target_batch[:, c])
-    loss.backward()
-    optimizer.step()
-    loss = loss.item()/seq_length
-    if epoch % 500 == 0:
-        print(f'Epoch {epoch} loss: {loss:.4f}')
+LOAD = True
+PATH = './models/text_generation/text_generation.pt'
+if LOAD:
+    model = torch.load(PATH)
+    model.eval()
+else:
+    for epoch in range(num_epochs):
+        hidden, cell = model.init_hidden(batch_size)
+        seq_batch, target_batch = next(iter(seq_dl))
+        seq_batch = seq_batch.to(device)
+        target_batch = target_batch.to(device)
+        optimizer.zero_grad()
+        loss = 0
+        for c in range(seq_length):
+            pred, hidden, cell = model(seq_batch[:, c], hidden, cell) 
+            loss += loss_fn(pred, target_batch[:, c])
+        loss.backward()
+        optimizer.step()
+        loss = loss.item()/seq_length
+        if epoch % 500 == 0:
+            print(f'Epoch {epoch} loss: {loss:.4f}')
  
 
+# Save learned model
+SAVE = False
+if SAVE:
+    torch.save(model, PATH)
 
 # ### Evaluation phase: generating new text passages
 
