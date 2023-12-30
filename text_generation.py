@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.distributions.categorical import Categorical
+import time
 
 # # Machine Learning with PyTorch and Scikit-Learn  
 # # -- Code Examples
@@ -217,12 +218,13 @@ num_epochs = 5000
 
 torch.manual_seed(1)
 
-LOAD = True
+LOAD = False
 PATH = './models/text_generation/text_generation.pt'
 if LOAD:
     model = torch.load(PATH)
     model.eval()
 else:
+    start_time = time.time()
     for epoch in range(num_epochs):
         hidden, cell = model.init_hidden(batch_size)
         seq_batch, target_batch = next(iter(seq_dl))
@@ -236,8 +238,10 @@ else:
         loss.backward()
         optimizer.step()
         loss = loss.item()/seq_length
-        if epoch % 500 == 0:
-            print(f'Epoch {epoch} loss: {loss:.4f}')
+        if epoch % 100 == 0:
+            end_time = time.time()
+            print(f'Epoch {epoch} loss: {loss:.4f} time: {end_time - start_time} secs')
+            start_time = time.time()
  
 
 # Save learned model
