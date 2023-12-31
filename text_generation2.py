@@ -160,7 +160,8 @@ model
 
 
 loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+# optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=)
 
 # num_epochs = 10000 
 num_epochs = 100
@@ -190,28 +191,30 @@ def train_procedure(dataloader):
     #     total_loss += loss.item()*label_batch.size(0)
     # return total_acc/len(dataloader.dataset), total_loss/len(dataloader.dataset)
 
-LOAD = False
+TRAIN = False
+LOAD = True
+SAVE = False
 PATH = './models/text_generation2/text_generation2.pt'
 if LOAD:
     model = torch.load(PATH)
-    model.eval()
-else:
+    if TRAIN:
+        model.train()
+    else:
+        model.eval()
+if TRAIN:
     start_time = time.time()
     for epoch in range(num_epochs):
-        # start_time = time.time()
         loss = train_procedure(seq_dl)
-        # end_time = time.time()
         if epoch % 1 == 0:
             end_time = time.time()
-            print(f'Epoch {epoch} loss: {loss:.4f} time: {end_time - start_time} secs')
+            print(f'Epoch {epoch} loss: {loss:.4f} time: {(end_time - start_time):.3f} secs')
             start_time = time.time()
- 
+            # Save learned model
+            if SAVE:
+                torch.save(model, PATH)
 
-# Save learned model
-SAVE = False
-if SAVE:
-    torch.save(model, PATH)
 
+model.eval()
 
 # ### Evaluation phase: generating new text passages
 
