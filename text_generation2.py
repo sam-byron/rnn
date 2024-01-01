@@ -73,7 +73,8 @@ for ex in text_encoded[:5]:
 
 
 
-seq_length = 40
+# seq_length = 40
+seq_length = 80
 chunk_size = seq_length + 1
 
 text_chunks = [text_encoded[i:i+chunk_size] 
@@ -119,7 +120,7 @@ device = torch.device("cuda:0")
 
 batch_size = 64
 
-torch.manual_seed(1)
+# torch.manual_seed(1)
 seq_dl = DataLoader(seq_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
 
@@ -135,12 +136,13 @@ class RNN(nn.Module):
         self.fc = nn.Linear(rnn_hidden_size, vocab_size)
 
     def forward(self, x, hidden, cell):
-        out = self.embedding(x).unsqueeze(1)
+        out = self.embedding(x)
         out, (hidden, cell) = self.rnn(out, (hidden, cell))
-        out = self.fc(out).reshape(out.size(0), -1)
+        out = self.fc(out)
         return out, hidden, cell
 
     def init_hidden(self, batch_size):
+        # 1 represents number of hidden layers in rnn
         hidden = torch.zeros(1, batch_size, self.rnn_hidden_size)
         cell = torch.zeros(1, batch_size, self.rnn_hidden_size)
         return hidden.to(device), cell.to(device)
@@ -151,7 +153,7 @@ embed_dim = 256
 rnn_hidden_size = 512
 # rnn_hidden_size = 512*2
 
-torch.manual_seed(1)
+# torch.manual_seed(1)
 model = RNN(vocab_size, embed_dim, rnn_hidden_size) 
 model = model.to(device)
 model
@@ -159,16 +161,14 @@ model
 
 
 
-loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=)
+loss_fn = nn.CrossEntropyLoss(reduction='mean')
+# optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-# num_epochs = 10000 
-num_epochs = 100
+num_epochs = 50
 
-torch.manual_seed(1)
+# torch.manual_seed(1)
 
-def train_procedure(dataloader):
+def train_procedure(dataloader, model, optimizer):
     model.train()
     total_acc, total_loss = 0, 0
     counter = 0
@@ -176,14 +176,13 @@ def train_procedure(dataloader):
         seq_batch = seq_batch.to(device)
         target_batch = target_batch.to(device)
         optimizer.zero_grad()
-        loss = 0
         hidden, cell = model.init_hidden(batch_size)
-        for c in range(seq_length):
-            pred, hidden, cell = model(seq_batch[:, c], hidden, cell) 
-            loss += loss_fn(pred, target_batch[:, c])
+        pred, hidden, cell = model(seq_batch, hidden, cell)
+        # maxpred = pred.argmax(2)
+        reordered_pred = pred.permute(0,2,1)
+        loss = loss_fn(reordered_pred, target_batch)
         loss.backward()
         optimizer.step()
-        loss = loss.item()/seq_length
         total_loss += loss
         counter += 1
     return total_loss/counter
@@ -191,20 +190,21 @@ def train_procedure(dataloader):
     #     total_loss += loss.item()*label_batch.size(0)
     # return total_acc/len(dataloader.dataset), total_loss/len(dataloader.dataset)
 
-TRAIN = False
+TRAIN = True
 LOAD = True
 SAVE = False
-PATH = './models/text_generation2/text_generation2.pt'
+PATH = './models/fast_txt_gen_80_len_seq/fast_txt_gen_80_len_seq.pt'
 if LOAD:
     model = torch.load(PATH)
     if TRAIN:
         model.train()
     else:
         model.eval()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 if TRAIN:
     start_time = time.time()
     for epoch in range(num_epochs):
-        loss = train_procedure(seq_dl)
+        loss = train_procedure(seq_dl, model, optimizer)
         if epoch % 1 == 0:
             end_time = time.time()
             print(f'Epoch {epoch} loss: {loss:.4f} time: {(end_time - start_time):.3f} secs')
@@ -218,7 +218,7 @@ model.eval()
 
 # ### Evaluation phase: generating new text passages
 
-torch.manual_seed(1)
+# torch.manual_seed(1)
 
 logits = torch.tensor([[1.0, 1.0, 1.0]])
 
@@ -232,7 +232,7 @@ print(samples.numpy())
 
 
 
-torch.manual_seed(1)
+# torch.manual_seed(1)
 
 logits = torch.tensor([[1.0, 1.0, 3.0]])
 
@@ -259,12 +259,11 @@ def sample(model, starting_str,
     hidden, cell = model.init_hidden(1)
     hidden = hidden.to('cpu')
     cell = cell.to('cpu')
-    for c in range(len(starting_str)-1):
-        _, hidden, cell = model(encoded_input[:, c].view(1), hidden, cell) 
+    _, hidden, cell = model(encoded_input, hidden, cell) 
     
     last_char = encoded_input[:, -1]
     for i in range(len_generated_text):
-        logits, hidden, cell = model(last_char.view(1), hidden, cell) 
+        logits, hidden, cell = model(last_char.unsqueeze(1), hidden, cell) 
         logits = torch.squeeze(logits, 0)
         scaled_logits = logits * scale_factor
         m = Categorical(logits=scaled_logits)
@@ -273,9 +272,10 @@ def sample(model, starting_str,
         
     return generated_str
 
-torch.manual_seed(1)
+# torch.manual_seed(1)
 model.to('cpu')
-print(sample(model, starting_str='The island'))
+# print(sample(model, starting_str='The island'))
+print(sample(model, starting_str='There was not a continent, nor even an island,'))
 
 
 # * **Predictability vs. randomness**
@@ -293,14 +293,14 @@ print('Probabilities after scaling with 0.1:', nn.functional.softmax(0.1*logits,
 
 
 
-torch.manual_seed(1)
+# torch.manual_seed(1)
 print(sample(model, starting_str='The island', 
              scale_factor=2.0))
 
 
 
 
-torch.manual_seed(1)
+# torch.manual_seed(1)
 print(sample(model, starting_str='The island', 
              scale_factor=0.5))
 
