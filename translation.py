@@ -71,7 +71,6 @@ val_dataset = EnSpaDataset(val_pairs)
 # Create dataloader
 from torch.utils.data import DataLoader
 
-device = torch.device("cuda:0")
 def encode_transform_batch(source_vocab, target_vocab):
 
     source_text_transform = lambda src: [source_vocab[token] for token in tokenizer(src)]
@@ -92,15 +91,16 @@ def encode_transform_batch(source_vocab, target_vocab):
 
 batch_size = 64
 collate_fn = encode_transform_batch(en_vocab, spa_vocab)
-# collate_fn(train_dataset)
 train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 valid_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 # Create model
 
 class RNN(nn.Module):
-    def __init__(self, vocab_size, target_vocab_size, embed_dim, target_embed_dim, rnn_hidden_size):
+    def __init__(self, vocab_size, target_vocab_size, embed_dim, target_embed_dim, rnn_hidden_size, batch_size, device):
         super().__init__()
+        self.batch_size = batch_size
+        self.device = device
         self.embedding = nn.Embedding(vocab_size, embed_dim) 
         self.target_embedding = nn.Embedding(target_vocab_size, target_embed_dim)
         self.rnn_hidden_size = rnn_hidden_size
@@ -110,12 +110,14 @@ class RNN(nn.Module):
         self.fc = nn.Linear(rnn_hidden_size, target_vocab_size)
     
 
-    def forward(self, src_lang, target_lang, d_hidden, d_cell):
+    def forward(self, src_lang, target_lang):
         src_embedding = self.embedding(src_lang)
         out, (e_hidden, e_cell) = self.encoder_rnn(src_embedding)
         target_embedding = self.target_embedding(target_lang)
         out, (d_hidden, d_cell) = self.decoder_rnn(target_embedding, (e_hidden, e_cell))
+        out = nn.Dropout(p=0.5)(out)
         out = self.fc(out)
+
         return out, d_hidden, d_cell
     
 
@@ -133,14 +135,13 @@ embed_dim = 256
 target_embed_dim = 256
 # rnn_hidden_size = 512
 rnn_hidden_size = 1024
-model = RNN(len(en_vocab), len(spa_vocab), embed_dim, target_embed_dim, rnn_hidden_size)
-# model = model.to(device)
+device = torch.device("cuda:0")
+model = RNN(len(en_vocab), len(spa_vocab), embed_dim, target_embed_dim, rnn_hidden_size, batch_size, device)
 print(model)
-hidden, cell = model.init_hidden(batch_size)
 src_batch, target_batch = next(iter(train_dl))
 src_batch_summary = src_batch
 target_batch_summary = target_batch
-summary(model, input_data=[src_batch_summary, target_batch_summary, hidden, cell], verbose=2)
+summary(model, input_data=[src_batch_summary, target_batch_summary], verbose=2)
 
 loss_fn = nn.CrossEntropyLoss(reduction='mean')
 
@@ -158,16 +159,14 @@ def train_procedure(dataloader, model, optimizer, device):
         src_batch = src_batch.to(device)
         target_batch = target_batch.to(device)
         optimizer.zero_grad()
-        hidden, cell = model.init_hidden(batch_size)
-        pred, hidden, cell = model(src_batch, target_batch[:,:-1], hidden, cell)
-        # pred = torch.nn.functional.softmax(pred, dim=2)
+        pred, hidden, cell = model(src_batch, target_batch[:,:-1])
         reordered_pred = pred.permute(0,2,1)
-        # reordered_pred = torch.nn.functional.softmax(pred.permute(0,2,1))
-        # maxpred = pred.argmax(2)
+        # Cross-entropy loss function expects inputs to be logits
         loss = loss_fn(reordered_pred, target_batch[:,1:])
         loss.backward()
         optimizer.step()
         total_loss += loss
+
         max_test_predictions = reordered_pred.argmax(axis=1)
         mislabeled = torch.ne(max_test_predictions, target_batch[:,1:])
         acc = 0
@@ -178,6 +177,7 @@ def train_procedure(dataloader, model, optimizer, device):
             acc = mean(acc)
             batch_acc.append(acc)
         total_acc += mean(batch_acc)
+        
         counter += 1
         del src_batch
         del target_batch
@@ -185,23 +185,18 @@ def train_procedure(dataloader, model, optimizer, device):
         del hidden
         del cell
         del reordered_pred
-        gc.collect()
-        torch.cuda.empty_cache()
     return total_loss/counter, total_acc/counter
 
 
 def validation_procedure(dataloader, model, device):
     model.eval()
-    # model.to(device)
-    # model.to("cpu")
     with torch.no_grad():
         total_acc, total_loss = 0, 0
         counter = 0
         for src_batch, target_batch in dataloader:
             src_batch = src_batch.to(device)
             target_batch = target_batch.to(device)
-            hidden, cell = model.init_hidden(batch_size)
-            pred, hidden, cell = model(src_batch, target_batch[:,:-1], hidden, cell)
+            pred, hidden, cell = model(src_batch, target_batch[:,:-1])
             reordered_pred = pred.permute(0,2,1)
             loss = loss_fn(reordered_pred, target_batch[:,1:])
             total_loss += loss
@@ -222,8 +217,6 @@ def validation_procedure(dataloader, model, device):
             del hidden
             del cell
             del reordered_pred
-            gc.collect()
-            torch.cuda.empty_cache()
     return total_loss/counter, total_acc/counter
 
 
@@ -240,11 +233,12 @@ if LOAD:
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 if TRAIN:
     start_time = time.time()
-    device = torch.device("cuda:0")
+    # device = torch.device("cuda:0")
     for epoch in range(num_epochs):
         loss, acc = train_procedure(train_dl, model, optimizer, device)
+        gc.collect()
+        torch.cuda.empty_cache()
         val_loss, val_acc = validation_procedure(valid_dl, model, device)
-    
         if epoch % 1 == 0:
             end_time = time.time()
             print(f'Epoch {epoch} loss: {loss:.4f} acc {acc:0.4f} val_loss: {val_loss:.4f} val_acc: {val_acc:0.4f} time: {(end_time - start_time):.3f} secs')
