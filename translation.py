@@ -10,6 +10,7 @@ from torchinfo import summary
 import math
 import time
 import os
+import random
 
 # https://pytorch.org/docs/stable/notes/cuda.html
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:1024"
@@ -31,6 +32,7 @@ for line in lines:
 # en_spa_pairs = en_spa_pairs[0:10000]   
 
 validation_split = 0.8
+random.shuffle(en_spa_pairs)
 train_pairs = en_spa_pairs[:math.floor(validation_split*len(en_spa_pairs))]
 val_pairs = en_spa_pairs[math.floor(validation_split*len(en_spa_pairs))+1:]
 
@@ -177,7 +179,7 @@ def train_procedure(dataloader, model, optimizer, device):
             acc = mean(acc)
             batch_acc.append(acc)
         total_acc += mean(batch_acc)
-        
+
         counter += 1
         del src_batch
         del target_batch
