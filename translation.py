@@ -32,7 +32,7 @@ for line in lines:
 # en_spa_pairs = en_spa_pairs[0:10000]   
 
 validation_split = 0.8
-random.shuffle(en_spa_pairs)
+# random.shuffle(en_spa_pairs)
 train_pairs = en_spa_pairs[:math.floor(validation_split*len(en_spa_pairs))]
 val_pairs = en_spa_pairs[math.floor(validation_split*len(en_spa_pairs))+1:]
 
@@ -150,7 +150,7 @@ loss_fn = nn.CrossEntropyLoss(reduction='mean')
 # Train
 from statistics import mean
 import gc
-num_epochs = 15
+
 
 def train_procedure(dataloader, model, optimizer, device):
     model.train()
@@ -224,7 +224,7 @@ def validation_procedure(dataloader, model, device):
 
 TRAIN = True
 LOAD = False
-SAVE = False
+SAVE = True
 PATH = './models/en_spa_translation/en_spa_translation.pt'
 if LOAD:
     model = torch.load(PATH)
@@ -233,6 +233,7 @@ if LOAD:
     else:
         model.eval()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+num_epochs = 5
 if TRAIN:
     start_time = time.time()
     # device = torch.device("cuda:0")
@@ -252,6 +253,7 @@ if TRAIN:
 
 # Evaluate
 from torch.distributions.categorical import Categorical
+import numpy as np
                 
 model.eval()
 
@@ -262,30 +264,49 @@ def sample(model, en_sentence, scale_factor=1.0):
 
     source_text_transform = lambda src: [en_vocab[token] for token in tokenizer(src)]
     en_sentence = torch.tensor(source_text_transform(en_sentence))
+    
 
     # next_word = start_translation_token
     target_text_transform = lambda target: [spa_vocab[token] for token in tokenizer(target)]
     # next_word = torch.tensor(target_text_transform(next_word))
 
-    seq_length = 10
-    spa_sentence = start_translation_token + " "
+    spa_sentence = start_translation_token
     spa_sentence_tokens = torch.tensor(target_text_transform(spa_sentence))
-    hidden, cell = model.init_hidden(1)
+    start_trans_token_vec = torch.tensor(target_text_transform(start_translation_token))
     end_trans_token_vec = torch.tensor(target_text_transform(end_translation_token))
     counter = 0
-    while spa_sentence_tokens[-1] != end_trans_token_vec and counter < 10:
+    while spa_sentence_tokens[-1] != end_trans_token_vec and counter < 20:
 
-        translation_logits, h, c = model(en_sentence, spa_sentence_tokens, hidden, cell)
+        translation_logits, h, c = model(en_sentence, spa_sentence_tokens)
         # translation_logits = torch.nn.functional.softmax(translation_logits, dim=1)
-        m = Categorical(logits=translation_logits)
+        # TODO: Sample next token more randomly
+        m = Categorical(logits=translation_logits[-1,:])
+        # m = Categorical(logits=translation_logits)
         next_word_token = m.sample()
-        next_word = spa_vocab.lookup_token(next_word_token[-1])
-        spa_sentence += next_word + " "
-        spa_sentence_tokens = torch.cat((spa_sentence_tokens, next_word_token))
+        next_word_token = np.argmax(translation_logits[-1,:].detach().numpy())
+        # next_word = spa_vocab.lookup_token(next_word_token[-1])
+        # spa_sentence += next_word + " "
+        spa_sentence_tokens = torch.cat((spa_sentence_tokens, torch.tensor([next_word_token])))
         # next_word = torch.tensor(target_text_transform(next_word))
         counter += 1
     
+    spa_seq_len = len(spa_sentence_tokens)
+    spa_sentence = ""
+    for i in range(spa_seq_len):
+        if spa_sentence_tokens[i] != start_trans_token_vec and spa_sentence_tokens[i] !=    end_trans_token_vec:
+            next_word = spa_vocab.lookup_token(spa_sentence_tokens[i])
+            spa_sentence += next_word + " "
+
     return spa_sentence
+
+num_samples = 10
+random_en_spa_pairs = random.sample(en_spa_pairs, num_samples)
+
+for i in range(num_samples):
+    en_sentence = random_en_spa_pairs[i][0]
+    spa_translation = sample(model, en_sentence)
+    # spa_translation = spa_translation[1:-1]
+    print(f'en sentence: {en_sentence} spa translation: {spa_translation}')
 
 print(sample(model, "How are you?"))
 print(sample(model, "What time is it"))
