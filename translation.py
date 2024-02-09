@@ -235,10 +235,10 @@ def validation_procedure(dataloader, model, device):
     return total_loss/counter, total_acc/counter
 
 
-TRAIN = True
+TRAIN = False
 LOAD = False
 SAVE = False
-SAMPLE = True
+SAMPLE = False
 BLEUSCORE = True
 PATH = './models/en_spa_translation/en_spa_translation.pt'
 if LOAD:
@@ -259,7 +259,8 @@ if TRAIN:
         val_loss, val_acc = validation_procedure(valid_dl, model, device)
         if epoch % 1 == 0:
             end_time = time.time()
-            print(f'Epoch {epoch} loss: {loss:.3f} acc {acc:0.3f} val_loss: {val_loss:.3f} val_acc: {val_acc:0.3f} bs: {bs:.3f} time: {(end_time - start_time):.3f} secs')
+            print(f'Epoch {epoch} loss: {loss:.3f} acc bs: {bs:.3f}')
+            print(f' val_loss: {val_loss:.3f} val_acc: {val_acc:0.3f} time: {(end_time - start_time):.3f} secs')
             start_time = time.time()
             # Save learned model
             if SAVE:
@@ -280,10 +281,7 @@ def sample(model, en_sentence, scale_factor=1.0):
     source_text_transform = lambda src: [en_vocab[token] for token in tokenizer(src)]
     en_sentence = torch.tensor(source_text_transform(en_sentence))
     
-
-    # next_word = start_translation_token
     target_text_transform = lambda target: [spa_vocab[token] for token in tokenizer(target)]
-    # next_word = torch.tensor(target_text_transform(next_word))
 
     spa_sentence = start_translation_token
     spa_sentence_tokens = torch.tensor(target_text_transform(spa_sentence))
@@ -293,16 +291,11 @@ def sample(model, en_sentence, scale_factor=1.0):
     while spa_sentence_tokens[-1] != end_trans_token_vec and counter < 20:
 
         translation_logits, h, c = model(en_sentence, spa_sentence_tokens)
-        # translation_logits = torch.nn.functional.softmax(translation_logits, dim=1)
         # TODO: Sample next token more randomly
         m = Categorical(logits=translation_logits[-1,:])
-        # m = Categorical(logits=translation_logits)
         next_word_token = m.sample()
         next_word_token = np.argmax(translation_logits[-1,:].detach().numpy())
-        # next_word = spa_vocab.lookup_token(next_word_token[-1])
-        # spa_sentence += next_word + " "
         spa_sentence_tokens = torch.cat((spa_sentence_tokens, torch.tensor([next_word_token])))
-        # next_word = torch.tensor(target_text_transform(next_word))
         counter += 1
     
     spa_seq_len = len(spa_sentence_tokens)
@@ -330,17 +323,9 @@ if SAMPLE:
     print(sample(model, "Good night"))
 
 # Offline BLEU Score Evaluation
-
-# class ReferenceDataset(Dataset):
-#     def __init__(self, eng_spa_pairs):
-#         self.eng_spa_pairs = eng_spa_pairs
-
-#     def __len__(self):
-#         return len(self.eng_spa_pairs)
-    
-#     def __getitem__(self, idx):
-#         reference = iter(self.eng_spa_pairs[idx][1])
-#         return reference
+# Unlike the BLUE score computed during training and evaluation, the offline computation
+# takes into account multiple possible translations of the same english sentence thus
+# making the score more accurate.
     
 if BLEUSCORE:
     validation_split = 0.2
@@ -373,6 +358,9 @@ if BLEUSCORE:
                 crnt_sentence = src_batch[i].tolist()
                 if crnt_sentence != last_sentence:
                     candidate_corpus.append(spa_tokens2str(max_test_predictions[i].tolist()))
+                    # Use as a sanity check by including the accurate translation from the reference corpus
+                    # in the candidate corpus
+                    # candidate_corpus.append(striper(spa_tokens2str(target_batch[i].tolist())))
                     reference_corpus.append([striper(spa_tokens2str(target_batch[i].tolist()))])
                     ref_idx += 1
                     last_sentence = crnt_sentence
