@@ -11,6 +11,7 @@ import math
 import time
 import os
 import random
+import copy
 
 # https://pytorch.org/docs/stable/notes/cuda.html
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:1024"
@@ -32,7 +33,8 @@ for line in lines:
 # en_spa_pairs = en_spa_pairs[0:10000]   
 
 validation_split = 0.8
-# random.shuffle(en_spa_pairs)
+ordered_en_spa_pairs = copy.deepcopy(en_spa_pairs)
+random.shuffle(en_spa_pairs)
 train_pairs = en_spa_pairs[:math.floor(validation_split*len(en_spa_pairs))]
 val_pairs = en_spa_pairs[math.floor(validation_split*len(en_spa_pairs))+1:]
 
@@ -66,7 +68,7 @@ class EnSpaDataset(Dataset):
     def __getitem__(self, idx):
         en, spa = self.eng_spa_pairs[idx]
         return en, spa
-    
+     
 train_dataset = EnSpaDataset(train_pairs)
 val_dataset = EnSpaDataset(val_pairs)
 
@@ -93,8 +95,8 @@ def encode_transform_batch(source_vocab, target_vocab):
 
 batch_size = 64
 collate_fn = encode_transform_batch(en_vocab, spa_vocab)
-train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-valid_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+train_dl = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, drop_last=True)
+valid_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, drop_last=True)
 
 # Create model
 
@@ -150,12 +152,16 @@ loss_fn = nn.CrossEntropyLoss(reduction='mean')
 # Train
 from statistics import mean
 import gc
+from torchtext.data.metrics import bleu_score
 
 
 def train_procedure(dataloader, model, optimizer, device):
     model.train()
     model.to(device)
-    total_acc, total_loss = 0, 0
+    total_acc, total_loss, total_bs = 0, 0, 0
+    spa_tokens2str = lambda tokens: [spa_vocab.lookup_token(token) for token in tokens]
+    en_tokens2str = lambda tokens: [en_vocab.lookup_token(token) for token in tokens]
+    striper = lambda words: [word for word in words if word not in ['baalesh','wa2ef','<pad>']]
     counter = 0
     for src_batch, target_batch in dataloader:
         src_batch = src_batch.to(device)
@@ -168,8 +174,15 @@ def train_procedure(dataloader, model, optimizer, device):
         loss.backward()
         optimizer.step()
         total_loss += loss
-
+        candidate_corpus = []
+        reference_corpus = []
         max_test_predictions = reordered_pred.argmax(axis=1)
+        for trans in max_test_predictions:
+            candidate_corpus.append(spa_tokens2str(trans.tolist()))
+        for target in target_batch:
+            reference_corpus.append([striper(spa_tokens2str(target.tolist()))])
+        bs = bleu_score(candidate_corpus, reference_corpus)
+        total_bs += bs
         mislabeled = torch.ne(max_test_predictions, target_batch[:,1:])
         acc = 0
         crnt_batch_size = len(mislabeled[:,0])
@@ -187,7 +200,7 @@ def train_procedure(dataloader, model, optimizer, device):
         del hidden
         del cell
         del reordered_pred
-    return total_loss/counter, total_acc/counter
+    return total_loss/counter, total_acc/counter, total_bs/counter
 
 
 def validation_procedure(dataloader, model, device):
@@ -224,7 +237,9 @@ def validation_procedure(dataloader, model, device):
 
 TRAIN = True
 LOAD = False
-SAVE = True
+SAVE = False
+SAMPLE = True
+BLEUSCORE = True
 PATH = './models/en_spa_translation/en_spa_translation.pt'
 if LOAD:
     model = torch.load(PATH)
@@ -233,18 +248,18 @@ if LOAD:
     else:
         model.eval()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-num_epochs = 5
+num_epochs = 20
 if TRAIN:
     start_time = time.time()
     # device = torch.device("cuda:0")
     for epoch in range(num_epochs):
-        loss, acc = train_procedure(train_dl, model, optimizer, device)
+        loss, acc, bs = train_procedure(train_dl, model, optimizer, device)
         gc.collect()
         torch.cuda.empty_cache()
         val_loss, val_acc = validation_procedure(valid_dl, model, device)
         if epoch % 1 == 0:
             end_time = time.time()
-            print(f'Epoch {epoch} loss: {loss:.4f} acc {acc:0.4f} val_loss: {val_loss:.4f} val_acc: {val_acc:0.4f} time: {(end_time - start_time):.3f} secs')
+            print(f'Epoch {epoch} loss: {loss:.3f} acc {acc:0.3f} val_loss: {val_loss:.3f} val_acc: {val_acc:0.3f} bs: {bs:.3f} time: {(end_time - start_time):.3f} secs')
             start_time = time.time()
             # Save learned model
             if SAVE:
@@ -299,16 +314,73 @@ def sample(model, en_sentence, scale_factor=1.0):
 
     return spa_sentence
 
-num_samples = 10
-random_en_spa_pairs = random.sample(en_spa_pairs, num_samples)
+if SAMPLE:
+    num_samples = 10
+    random_en_spa_pairs = random.sample(en_spa_pairs, num_samples)
 
-for i in range(num_samples):
-    en_sentence = random_en_spa_pairs[i][0]
-    spa_translation = sample(model, en_sentence)
-    # spa_translation = spa_translation[1:-1]
-    print(f'en sentence: {en_sentence} spa translation: {spa_translation}')
+    for i in range(num_samples):
+        en_sentence = random_en_spa_pairs[i][0]
+        spa_translation = sample(model, en_sentence)
+        # spa_translation = spa_translation[1:-1]
+        print(f'en sentence: {en_sentence} spa translation: {spa_translation}')
 
-print(sample(model, "How are you?"))
-print(sample(model, "What time is it"))
-print(sample(model, "I want to go home"))
-print(sample(model, "Good night"))
+    print(sample(model, "How are you?"))
+    print(sample(model, "What time is it"))
+    print(sample(model, "I want to go home"))
+    print(sample(model, "Good night"))
+
+# Offline BLEU Score Evaluation
+
+# class ReferenceDataset(Dataset):
+#     def __init__(self, eng_spa_pairs):
+#         self.eng_spa_pairs = eng_spa_pairs
+
+#     def __len__(self):
+#         return len(self.eng_spa_pairs)
+    
+#     def __getitem__(self, idx):
+#         reference = iter(self.eng_spa_pairs[idx][1])
+#         return reference
+    
+if BLEUSCORE:
+    validation_split = 0.2
+    train_pairs = ordered_en_spa_pairs[:math.floor(validation_split*len(ordered_en_spa_pairs))]
+    val_pairs = ordered_en_spa_pairs[math.floor(validation_split*len(ordered_en_spa_pairs))+1:]
+
+    val_dataset = EnSpaDataset(train_pairs)
+    val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=True, collate_fn=collate_fn)
+
+    spa_tokens2str = lambda tokens: [spa_vocab.lookup_token(token) for token in tokens]
+    en_tokens2str = lambda tokens: [en_vocab.lookup_token(token) for token in tokens]
+    striper = lambda words: [word for word in words if word not in ['baalesh','wa2ef','<pad>']]
+
+    model.to(device)
+    model.eval()
+    with torch.no_grad():
+        total_acc, total_loss, total_bs = 0, 0, 0
+        counter = 0
+        for src_batch, target_batch in val_dl:
+            src_batch = src_batch.to(device)
+            target_batch = target_batch.to(device)
+            pred, hidden, cell = model(src_batch, target_batch[:,:-1])
+            reordered_pred = pred.permute(0,2,1)
+            max_test_predictions = reordered_pred.argmax(axis=1)
+            candidate_corpus = []
+            reference_corpus = []
+            last_sentence = []
+            ref_idx = -1
+            for i in range(batch_size):
+                crnt_sentence = src_batch[i].tolist()
+                if crnt_sentence != last_sentence:
+                    candidate_corpus.append(spa_tokens2str(max_test_predictions[i].tolist()))
+                    reference_corpus.append([striper(spa_tokens2str(target_batch[i].tolist()))])
+                    ref_idx += 1
+                    last_sentence = crnt_sentence
+                else:
+                    reference_corpus[ref_idx].append(striper(spa_tokens2str(target_batch[i].tolist())))
+            bs = bleu_score(candidate_corpus, reference_corpus)
+            total_bs += bs
+            counter += 1
+        bs = total_bs/counter
+
+    print(f'BLEU Score: {bs:.3f}')
