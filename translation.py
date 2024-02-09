@@ -34,7 +34,9 @@ for line in lines:
 
 validation_split = 0.8
 ordered_en_spa_pairs = copy.deepcopy(en_spa_pairs)
-random.shuffle(en_spa_pairs)
+# Shuffling introduces longer sentences which reduces the peformances of the curent
+# model wrt BLEU score but increases accuracy on train and validation set.
+# random.shuffle(en_spa_pairs)
 train_pairs = en_spa_pairs[:math.floor(validation_split*len(en_spa_pairs))]
 val_pairs = en_spa_pairs[math.floor(validation_split*len(en_spa_pairs))+1:]
 
@@ -105,8 +107,11 @@ class RNN(nn.Module):
         super().__init__()
         self.batch_size = batch_size
         self.device = device
-        self.embedding = nn.Embedding(vocab_size, embed_dim) 
-        self.target_embedding = nn.Embedding(target_vocab_size, target_embed_dim)
+        # It's important to specify to embedding layer the padding index which needs to be
+        # ignored when computing gradients. See book "Maching Learning with Pytorch and scikit-learn chapter 15, page 519"
+        # https://pytorch.org/docs/stable/generated/torch.nn.Embedding.html
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0) 
+        self.target_embedding = nn.Embedding(target_vocab_size, target_embed_dim, padding_idx=0)
         self.rnn_hidden_size = rnn_hidden_size
         self.encoder_rnn = nn.LSTM(embed_dim, rnn_hidden_size, 
                            batch_first=True)
@@ -183,16 +188,9 @@ def train_procedure(dataloader, model, optimizer, device):
             reference_corpus.append([striper(spa_tokens2str(target.tolist()))])
         bs = bleu_score(candidate_corpus, reference_corpus)
         total_bs += bs
-        mislabeled = torch.ne(max_test_predictions, target_batch[:,1:])
-        acc = 0
-        crnt_batch_size = len(mislabeled[:,0])
-        batch_acc = []
-        for i in range(crnt_batch_size):
-            acc = [1 if x == False else 0 for x in mislabeled[i,:]]
-            acc = mean(acc)
-            batch_acc.append(acc)
-        total_acc += mean(batch_acc)
-
+        correct = torch.eq(max_test_predictions, target_batch[:,1:])
+        acc = torch.mean(torch.sum(correct, 1).float()/correct.shape[1])
+        total_acc += acc
         counter += 1
         del src_batch
         del target_batch
@@ -216,15 +214,9 @@ def validation_procedure(dataloader, model, device):
             loss = loss_fn(reordered_pred, target_batch[:,1:])
             total_loss += loss
             max_test_predictions = reordered_pred.argmax(axis=1)
-            mislabeled = torch.ne(max_test_predictions, target_batch[:,1:])
-            acc = 0
-            crnt_batch_size = len(mislabeled[:,0])
-            batch_acc = []
-            for i in range(crnt_batch_size):
-                acc = [1 if x == False else 0 for x in mislabeled[i,:]]
-                acc = mean(acc)
-                batch_acc.append(acc)
-            total_acc += mean(batch_acc)
+            correct = torch.eq(max_test_predictions, target_batch[:,1:])
+            acc = torch.mean(torch.sum(correct, 1).float()/correct.shape[1])
+            total_acc += acc
             counter += 1
             del src_batch
             del target_batch
@@ -235,7 +227,7 @@ def validation_procedure(dataloader, model, device):
     return total_loss/counter, total_acc/counter
 
 
-TRAIN = False
+TRAIN = True
 LOAD = False
 SAVE = False
 SAMPLE = False
@@ -259,8 +251,8 @@ if TRAIN:
         val_loss, val_acc = validation_procedure(valid_dl, model, device)
         if epoch % 1 == 0:
             end_time = time.time()
-            print(f'Epoch {epoch} loss: {loss:.3f} acc bs: {bs:.3f}')
-            print(f' val_loss: {val_loss:.3f} val_acc: {val_acc:0.3f} time: {(end_time - start_time):.3f} secs')
+            print(f'Epoch {epoch} loss: {loss:.3f} acc {acc:0.3f} bs: {bs:.3f}')
+            print(f'val_loss: {val_loss:.3f} val_acc: {val_acc:0.3f} time: {(end_time - start_time):.3f} secs')
             start_time = time.time()
             # Save learned model
             if SAVE:
@@ -359,7 +351,7 @@ if BLEUSCORE:
                 if crnt_sentence != last_sentence:
                     candidate_corpus.append(spa_tokens2str(max_test_predictions[i].tolist()))
                     # Use as a sanity check by including the accurate translation from the reference corpus
-                    # in the candidate corpus
+                    # in the candidate corpus.
                     # candidate_corpus.append(striper(spa_tokens2str(target_batch[i].tolist())))
                     reference_corpus.append([striper(spa_tokens2str(target_batch[i].tolist()))])
                     ref_idx += 1
