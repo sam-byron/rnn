@@ -30,7 +30,7 @@ for line in lines:
     en_spa_pairs.append((english, spanish))
 
 # For quick testing
-en_spa_pairs = en_spa_pairs[0:10000]   
+# en_spa_pairs = en_spa_pairs[0:10000]   
 
 # train_val_split = 0.8
 # ordered_en_spa_pairs = copy.deepcopy(en_spa_pairs)
