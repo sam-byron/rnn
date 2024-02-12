@@ -249,9 +249,9 @@ def validation_procedure(dataloader, model, device):
     return total_loss/counter, total_acc/counter
 
 
-TRAIN = False
-LOAD = True
-SAVE = False
+TRAIN = True
+LOAD = False
+SAVE = True
 SAMPLE = True
 BLEUSCORE = True
 PATH = './models/en_spa_translation/en_spa_translation.pt'
@@ -262,7 +262,7 @@ if LOAD:
     else:
         model.eval()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-num_epochs = 5
+num_epochs = 20
 if TRAIN:
     start_time = time.time()
     # device = torch.device("cuda:0")
