@@ -30,15 +30,26 @@ for line in lines:
     en_spa_pairs.append((english, spanish))
 
 # For quick testing
-# en_spa_pairs = en_spa_pairs[0:10000]   
+en_spa_pairs = en_spa_pairs[0:10000]   
 
-validation_split = 0.8
-ordered_en_spa_pairs = copy.deepcopy(en_spa_pairs)
-# Shuffling introduces longer sentences which reduces the peformances of the curent
-# model wrt BLEU score but increases accuracy on train and validation set.
-# random.shuffle(en_spa_pairs)
-train_pairs = en_spa_pairs[:math.floor(validation_split*len(en_spa_pairs))]
-val_pairs = en_spa_pairs[math.floor(validation_split*len(en_spa_pairs))+1:]
+# train_val_split = 0.8
+# ordered_en_spa_pairs = copy.deepcopy(en_spa_pairs)
+# train_val_pairs = en_spa_pairs[:math.floor(train_val_split*len(en_spa_pairs))]
+# test_pairs = en_spa_pairs[math.floor(train_val_split*len(en_spa_pairs))+1:]
+# # Shuffling introduces longer sentences which reduces the peformances of the curent
+# # model wrt BLEU score but increases accuracy on train and validation set.
+# random.shuffle(train_val_pairs)
+# val_split = 0.7
+# train_pairs = train_val_pairs[:math.floor(val_split*len(train_val_pairs))]
+# val_pairs = train_val_pairs[math.floor(val_split*len(train_val_pairs))+1:]
+
+val_split = 0.6
+test_split = 0.8
+train_pairs = en_spa_pairs[:math.floor(val_split*len(en_spa_pairs))]
+val_pairs = en_spa_pairs[math.floor(val_split*len(en_spa_pairs))+1:math.floor(test_split*len(en_spa_pairs))]
+test_pairs = en_spa_pairs[math.floor(test_split*len(en_spa_pairs))+1:]
+
+indices = list(range(len(en_spa_pairs)))
 
 # Tokenize
 from text_preprocessing import tokenizer, vocab_builder
@@ -73,6 +84,7 @@ class EnSpaDataset(Dataset):
      
 train_dataset = EnSpaDataset(train_pairs)
 val_dataset = EnSpaDataset(val_pairs)
+test_dataset = EnSpaDataset(test_pairs)
 
 # Create dataloader
 from torch.utils.data import DataLoader
@@ -83,15 +95,21 @@ def encode_transform_batch(source_vocab, target_vocab):
     target_text_transform = lambda target: [target_vocab[token] for token in tokenizer(target)]
 
     def collate_fn(batch):
-        src_list, target_list = [], []
+        src_list, target_list, src_lengths, target_lengths = [], [], [], []
         for _src, _target in batch:
-            src_list.append(torch.tensor(source_text_transform(_src)))
-            target_list.append(torch.tensor(target_text_transform(_target)))
+            processed_src = torch.tensor(source_text_transform(_src))
+            src_list.append(processed_src)
+            src_lengths.append(processed_src.shape[0])
+            processed_target = torch.tensor(target_text_transform(_target))
+            target_list.append(processed_target)
+            # Decrease by 1 bc terminating token will be removed at training time
+            target_lengths.append(processed_target.shape[0]-1)
+            
         padded_src_list = nn.utils.rnn.pad_sequence(
             src_list, batch_first=True)
         padded_target_list = nn.utils.rnn.pad_sequence(
             target_list, batch_first=True)
-        return padded_src_list, padded_target_list
+        return padded_src_list, padded_target_list, src_lengths
     
     return collate_fn
 
@@ -116,14 +134,18 @@ class RNN(nn.Module):
         self.encoder_rnn = nn.LSTM(embed_dim, rnn_hidden_size, 
                            batch_first=True)
         self.decoder_rnn = nn.LSTM(target_embed_dim, rnn_hidden_size, batch_first=True)
+        # self.decoder_rnn = nn.LSTM(target_embed_dim, rnn_hidden_size, batch_first=True, dropout=0.5)
         self.fc = nn.Linear(rnn_hidden_size, target_vocab_size)
     
 
-    def forward(self, src_lang, target_lang):
+    def forward(self, src_lang, target_lang, src_lengths):
         src_embedding = self.embedding(src_lang)
-        out, (e_hidden, e_cell) = self.encoder_rnn(src_embedding)
+        out = nn.utils.rnn.pack_padded_sequence(src_embedding, src_lengths, enforce_sorted=False, batch_first=True)
+        out, (e_hidden, e_cell) = self.encoder_rnn(out)
         target_embedding = self.target_embedding(target_lang)
+        # out = nn.utils.rnn.pack_padded_sequence(target_embedding, target_lengths, enforce_sorted=False, batch_first=True)
         out, (d_hidden, d_cell) = self.decoder_rnn(target_embedding, (e_hidden, e_cell))
+        # out, _ = nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
         out = nn.Dropout(p=0.5)(out)
         out = self.fc(out)
 
@@ -147,10 +169,10 @@ rnn_hidden_size = 1024
 device = torch.device("cuda:0")
 model = RNN(len(en_vocab), len(spa_vocab), embed_dim, target_embed_dim, rnn_hidden_size, batch_size, device)
 print(model)
-src_batch, target_batch = next(iter(train_dl))
+src_batch, target_batch, src_lengths = next(iter(train_dl))
 src_batch_summary = src_batch
 target_batch_summary = target_batch
-summary(model, input_data=[src_batch_summary, target_batch_summary], verbose=2)
+summary(model, input_data=[src_batch_summary, target_batch_summary, src_lengths], verbose=2)
 
 loss_fn = nn.CrossEntropyLoss(reduction='mean')
 
@@ -168,11 +190,11 @@ def train_procedure(dataloader, model, optimizer, device):
     en_tokens2str = lambda tokens: [en_vocab.lookup_token(token) for token in tokens]
     striper = lambda words: [word for word in words if word not in ['baalesh','wa2ef','<pad>']]
     counter = 0
-    for src_batch, target_batch in dataloader:
+    for src_batch, target_batch, src_lengths in dataloader:
         src_batch = src_batch.to(device)
         target_batch = target_batch.to(device)
         optimizer.zero_grad()
-        pred, hidden, cell = model(src_batch, target_batch[:,:-1])
+        pred, hidden, cell = model(src_batch, target_batch[:,:-1], src_lengths)
         reordered_pred = pred.permute(0,2,1)
         # Cross-entropy loss function expects inputs to be logits
         loss = loss_fn(reordered_pred, target_batch[:,1:])
@@ -206,10 +228,10 @@ def validation_procedure(dataloader, model, device):
     with torch.no_grad():
         total_acc, total_loss = 0, 0
         counter = 0
-        for src_batch, target_batch in dataloader:
+        for src_batch, target_batch, src_lengths in dataloader:
             src_batch = src_batch.to(device)
             target_batch = target_batch.to(device)
-            pred, hidden, cell = model(src_batch, target_batch[:,:-1])
+            pred, hidden, cell = model(src_batch, target_batch[:,:-1], src_lengths)
             reordered_pred = pred.permute(0,2,1)
             loss = loss_fn(reordered_pred, target_batch[:,1:])
             total_loss += loss
@@ -227,10 +249,10 @@ def validation_procedure(dataloader, model, device):
     return total_loss/counter, total_acc/counter
 
 
-TRAIN = True
-LOAD = False
+TRAIN = False
+LOAD = True
 SAVE = False
-SAMPLE = False
+SAMPLE = True
 BLEUSCORE = True
 PATH = './models/en_spa_translation/en_spa_translation.pt'
 if LOAD:
@@ -240,7 +262,7 @@ if LOAD:
     else:
         model.eval()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-num_epochs = 20
+num_epochs = 5
 if TRAIN:
     start_time = time.time()
     # device = torch.device("cuda:0")
@@ -282,8 +304,10 @@ def sample(model, en_sentence, scale_factor=1.0):
     counter = 0
     while spa_sentence_tokens[-1] != end_trans_token_vec and counter < 20:
 
-        translation_logits, h, c = model(en_sentence, spa_sentence_tokens)
+        translation_logits, h, c = model(en_sentence.unsqueeze(0), spa_sentence_tokens.unsqueeze(0), [len(en_sentence)])
+        # translation_logits, h, c = model(en_sentence, spa_sentence_tokens, len(en_sentence))
         # TODO: Sample next token more randomly
+        translation_logits = torch.squeeze(translation_logits, 0)
         m = Categorical(logits=translation_logits[-1,:])
         next_word_token = m.sample()
         next_word_token = np.argmax(translation_logits[-1,:].detach().numpy())
@@ -320,12 +344,12 @@ if SAMPLE:
 # making the score more accurate.
     
 if BLEUSCORE:
-    validation_split = 0.2
-    train_pairs = ordered_en_spa_pairs[:math.floor(validation_split*len(ordered_en_spa_pairs))]
-    val_pairs = ordered_en_spa_pairs[math.floor(validation_split*len(ordered_en_spa_pairs))+1:]
+    # validation_split = 0.2
+    # train_pairs = ordered_en_spa_pairs[:math.floor(validation_split*len(ordered_en_spa_pairs))]
+    # val_pairs = ordered_en_spa_pairs[math.floor(validation_split*len(ordered_en_spa_pairs))+1:]
 
-    val_dataset = EnSpaDataset(train_pairs)
-    val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=True, collate_fn=collate_fn)
+    # val_dataset = EnSpaDataset(train_pairs)
+    # val_dl = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=True, collate_fn=collate_fn)
 
     spa_tokens2str = lambda tokens: [spa_vocab.lookup_token(token) for token in tokens]
     en_tokens2str = lambda tokens: [en_vocab.lookup_token(token) for token in tokens]
@@ -336,10 +360,10 @@ if BLEUSCORE:
     with torch.no_grad():
         total_acc, total_loss, total_bs = 0, 0, 0
         counter = 0
-        for src_batch, target_batch in val_dl:
+        for src_batch, target_batch, src_lengths in valid_dl:
             src_batch = src_batch.to(device)
             target_batch = target_batch.to(device)
-            pred, hidden, cell = model(src_batch, target_batch[:,:-1])
+            pred, hidden, cell = model(src_batch, target_batch[:,:-1], src_lengths)
             reordered_pred = pred.permute(0,2,1)
             max_test_predictions = reordered_pred.argmax(axis=1)
             candidate_corpus = []
