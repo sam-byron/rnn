@@ -216,12 +216,7 @@ def train_procedure(dataloader, model, optimizer, device):
         acc = torch.mean(torch.sum(correct, 1).float()/correct.shape[1])
         total_acc += acc
         counter += 1
-        del src_batch
-        del target_batch
-        del pred
-        del hidden
-        del cell
-        del reordered_pred
+
     return total_loss/counter, total_acc/counter, total_bs/counter
 
 
@@ -242,12 +237,7 @@ def validation_procedure(dataloader, model, device):
             acc = torch.mean(torch.sum(correct, 1).float()/correct.shape[1])
             total_acc += acc
             counter += 1
-            del src_batch
-            del target_batch
-            del pred
-            del hidden
-            del cell
-            del reordered_pred
+
     return total_loss/counter, total_acc/counter
 
 
@@ -270,8 +260,6 @@ if TRAIN:
     # device = torch.device("cuda:0")
     for epoch in range(num_epochs):
         loss, acc, bs = train_procedure(train_dl, model, optimizer, device)
-        gc.collect()
-        torch.cuda.empty_cache()
         val_loss, val_acc = validation_procedure(valid_dl, model, device)
         if epoch % 1 == 0:
             end_time = time.time()
