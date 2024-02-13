@@ -166,7 +166,6 @@ class RNN(nn.Module):
 embed_dim = 256
 # target_embed_dim = math.floor(len(spa_vocab)*0.05)
 target_embed_dim = 256
-# rnn_hidden_size = 512
 rnn_hidden_size = 1024
 device = torch.device("cuda:0")
 model = RNN(len(en_vocab), len(spa_vocab), embed_dim, target_embed_dim, rnn_hidden_size, batch_size, device)
@@ -183,14 +182,22 @@ from statistics import mean
 import gc
 from torchtext.data.metrics import bleu_score
 
+def compute_bleu_score(predictions, targets):
+    spa_tokens2str = lambda tokens: [spa_vocab.lookup_token(token) for token in tokens]
+    striper = lambda words: [word for word in words if word not in ['baalesh','wa2ef','<pad>']]
+    candidate_corpus = []
+    reference_corpus = []
+    for trans in predictions:
+        candidate_corpus.append(spa_tokens2str(trans.tolist()))
+    for target in targets:
+        reference_corpus.append([striper(spa_tokens2str(target.tolist()))])
+
+    return bleu_score(candidate_corpus, reference_corpus)
 
 def train_procedure(dataloader, model, optimizer, device):
     model.train()
     model.to(device)
     total_acc, total_loss, total_bs = 0, 0, 0
-    spa_tokens2str = lambda tokens: [spa_vocab.lookup_token(token) for token in tokens]
-    en_tokens2str = lambda tokens: [en_vocab.lookup_token(token) for token in tokens]
-    striper = lambda words: [word for word in words if word not in ['baalesh','wa2ef','<pad>']]
     counter = 0
     for src_batch, target_batch, src_lengths in dataloader:
         src_batch = src_batch.to(device)
@@ -203,16 +210,10 @@ def train_procedure(dataloader, model, optimizer, device):
         loss.backward()
         optimizer.step()
         total_loss += loss
-        candidate_corpus = []
-        reference_corpus = []
-        max_test_predictions = reordered_pred.argmax(axis=1)
-        for trans in max_test_predictions:
-            candidate_corpus.append(spa_tokens2str(trans.tolist()))
-        for target in target_batch:
-            reference_corpus.append([striper(spa_tokens2str(target.tolist()))])
-        bs = bleu_score(candidate_corpus, reference_corpus)
+        max_predictions = reordered_pred.argmax(axis=1)
+        bs = compute_bleu_score(max_predictions, target_batch)
         total_bs += bs
-        correct = torch.eq(max_test_predictions, target_batch[:,1:])
+        correct = torch.eq(max_predictions, target_batch[:,1:])
         acc = torch.mean(torch.sum(correct, 1).float()/correct.shape[1])
         total_acc += acc
         counter += 1
@@ -223,7 +224,7 @@ def train_procedure(dataloader, model, optimizer, device):
 def validation_procedure(dataloader, model, device):
     model.eval()
     with torch.no_grad():
-        total_acc, total_loss = 0, 0
+        total_acc, total_loss, total_bs = 0, 0, 0
         counter = 0
         for src_batch, target_batch, src_lengths in dataloader:
             src_batch = src_batch.to(device)
@@ -232,13 +233,15 @@ def validation_procedure(dataloader, model, device):
             reordered_pred = pred.permute(0,2,1)
             loss = loss_fn(reordered_pred, target_batch[:,1:])
             total_loss += loss
-            max_test_predictions = reordered_pred.argmax(axis=1)
-            correct = torch.eq(max_test_predictions, target_batch[:,1:])
+            max_predictions = reordered_pred.argmax(axis=1)
+            bs = compute_bleu_score(max_predictions, target_batch)
+            total_bs += bs
+            correct = torch.eq(max_predictions, target_batch[:,1:])
             acc = torch.mean(torch.sum(correct, 1).float()/correct.shape[1])
             total_acc += acc
             counter += 1
 
-    return total_loss/counter, total_acc/counter
+    return total_loss/counter, total_acc/counter, total_bs/counter
 
 
 TRAIN = True
@@ -260,11 +263,11 @@ if TRAIN:
     # device = torch.device("cuda:0")
     for epoch in range(num_epochs):
         loss, acc, bs = train_procedure(train_dl, model, optimizer, device)
-        val_loss, val_acc = validation_procedure(valid_dl, model, device)
+        val_loss, val_acc, val_bs = validation_procedure(valid_dl, model, device)
         if epoch % 1 == 0:
             end_time = time.time()
             print(f'Epoch {epoch} loss: {loss:.3f} acc {acc:0.3f} bs: {bs:.3f}')
-            print(f'val_loss: {val_loss:.3f} val_acc: {val_acc:0.3f} time: {(end_time - start_time):.3f} secs')
+            print(f'val_loss: {val_loss:.3f} val_acc: {val_acc:0.3f} val_bs: {val_bs:.3f} time: {(end_time - start_time):.3f} secs')
             start_time = time.time()
             # Save learned model
             if SAVE:
