@@ -132,10 +132,10 @@ class RNN(nn.Module):
         self.target_embedding = nn.Embedding(target_vocab_size, target_embed_dim, padding_idx=0)
         self.rnn_hidden_size = rnn_hidden_size
         self.encoder_rnn = nn.LSTM(embed_dim, rnn_hidden_size, 
-                           batch_first=True)
-        self.decoder_rnn = nn.LSTM(target_embed_dim, rnn_hidden_size, batch_first=True)
+                           batch_first=True, bidirectional=True)
+        self.decoder_rnn = nn.LSTM(target_embed_dim, 2*rnn_hidden_size, batch_first=True)
         # self.decoder_rnn = nn.LSTM(target_embed_dim, rnn_hidden_size, batch_first=True, dropout=0.5)
-        self.fc = nn.Linear(rnn_hidden_size, target_vocab_size)
+        self.fc = nn.Linear(2*rnn_hidden_size, target_vocab_size)
     
 
     def forward(self, src_lang, target_lang, src_lengths):
@@ -144,7 +144,9 @@ class RNN(nn.Module):
         out, (e_hidden, e_cell) = self.encoder_rnn(out)
         target_embedding = self.target_embedding(target_lang)
         # out = nn.utils.rnn.pack_padded_sequence(target_embedding, target_lengths, enforce_sorted=False, batch_first=True)
-        out, (d_hidden, d_cell) = self.decoder_rnn(target_embedding, (e_hidden, e_cell))
+        e_hidden_cat = torch.cat((e_hidden[-2, :, :], e_hidden[-1, :, :]), dim=1)
+        e_cell_cat = torch.cat((e_cell[-2, :, :], e_cell[-1, :, :]), dim=1)
+        out, (d_hidden, d_cell) = self.decoder_rnn(target_embedding, (e_hidden_cat.unsqueeze(0), e_cell_cat.unsqueeze(0)))
         # out, _ = nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
         out = nn.Dropout(p=0.5)(out)
         out = self.fc(out)
@@ -251,7 +253,7 @@ def validation_procedure(dataloader, model, device):
 
 TRAIN = True
 LOAD = False
-SAVE = True
+SAVE = False
 SAMPLE = True
 BLEUSCORE = True
 PATH = './models/en_spa_translation/en_spa_translation.pt'
